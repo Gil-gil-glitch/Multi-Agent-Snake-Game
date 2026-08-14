@@ -46,7 +46,7 @@ if __name__ == "__main__":
 
     print(f"--> Initializing Training on {device}...", flush=True)
 
-    for episode in range(100):
+    for episode in range(5000):
         obs, _ = env.reset()
         total_rewards = {agent: 0 for agent in env.possible_agents}
         step_count = 0
@@ -103,11 +103,15 @@ if __name__ == "__main__":
                 loss.backward()
                 optimizer.step()
 
-        epsilon = max(0.05, epsilon * 0.995)
+        epsilon = max(0.05, epsilon * 0.999)
 
         # Print Episode 1 instantly, then every 5 episodes after
         if (episode + 1) == 1 or (episode + 1) % 5 == 0:
             print(f"Episode {episode + 1:4d} | Cyan Reward: {total_rewards['snake_0']:.2f} | Epsilon: {epsilon:.2f} | Steps: {step_count}", flush=True)
+
+        if (episode + 1) % 1000 == 0:
+            torch.save(q_net.state_dict(), f"snake_qnet_{episode + 1}.pth")
+            print(f"--> Saved checkpoint at episode {episode + 1}!", flush=True)
 
     # SAVE WEIGHTS AFTER TRAINING
     torch.save(q_net.state_dict(), "snake_qnet.pth")
