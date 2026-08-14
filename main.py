@@ -11,7 +11,6 @@ if __name__ == "__main__":
     print("Opponents: Magenta & Orange AI Bots.")
     print("Tactics: Push enemy snakes into Lava for +50 PTS!")
 
-
     while running:
         running = game.handle_input()
         game.update()
