@@ -46,7 +46,7 @@ if __name__ == "__main__":
 
     print(f"--> Initializing Training on {device}...", flush=True)
 
-    for episode in range(1000):
+    for episode in range(100):
         obs, _ = env.reset()
         total_rewards = {agent: 0 for agent in env.possible_agents}
         step_count = 0
