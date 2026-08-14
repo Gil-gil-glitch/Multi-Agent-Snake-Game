@@ -40,16 +40,20 @@ if __name__ == "__main__":
     replay_buffer = deque(maxlen=50000)
     
     epsilon = 1.0
-    batch_size = 32
+    batch_size = 128  # Saturated for RTX 3060
     gamma = 0.99
+    MAX_STEPS_PER_EPISODE = 500  # Cap episode length so training advances smoothly
 
-    print(f"Training Multi-Agent Snake Arena on {device}...")
+    print(f"--> Initializing Training on {device}...", flush=True)
 
     for episode in range(1000):
         obs, _ = env.reset()
         total_rewards = {agent: 0 for agent in env.possible_agents}
+        step_count = 0
         
-        while env.agents:
+        # Loop until all snakes die OR step limit is reached
+        while env.agents and step_count < MAX_STEPS_PER_EPISODE:
+            step_count += 1
             actions = {}
             
             # Select Epsilon-Greedy Action for each active agent
@@ -101,7 +105,11 @@ if __name__ == "__main__":
 
         epsilon = max(0.05, epsilon * 0.995)
 
-        if (episode + 1) % 20 == 0:
-            print(f"Episode {episode + 1:4d} | Cyan Avg Reward: {total_rewards['snake_0']:.2f} | Epsilon: {epsilon:.2f}")
+        # Print Episode 1 instantly, then every 5 episodes after
+        if (episode + 1) == 1 or (episode + 1) % 5 == 0:
+            print(f"Episode {episode + 1:4d} | Cyan Reward: {total_rewards['snake_0']:.2f} | Epsilon: {epsilon:.2f} | Steps: {step_count}", flush=True)
 
+    # SAVE WEIGHTS AFTER TRAINING
+    torch.save(q_net.state_dict(), "snake_qnet.pth")
+    print("\n[SUCCESS] Model saved to snake_qnet.pth!", flush=True)
     env.close()
