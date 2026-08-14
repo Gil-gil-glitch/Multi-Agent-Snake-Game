@@ -1,180 +1,117 @@
-import random
+import gymnasium as gym
+from gymnasium import spaces
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 
-# --- Maze Definition ---
-# 0 = open, 1 = wall, 2 = goal
-maze = [
-    [0,1,0,1,0,0,0,1,0,0,1,0,0,1,0],
-    [0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],
-    [0,0,0,0,0,1,0,0,0,0,0,1,0,0,0],
-    [1,0,1,1,0,1,1,1,0,1,0,1,1,1,0],
-    [0,0,1,0,0,0,0,0,1,0,0,0,0,1,0],
-    [1,0,1,0,1,0,1,0,0,0,1,0,1,0,0],
-    [0,0,0,0,1,0,0,1,0,0,1,0,0,0,0],
-    [1,0,1,0,0,1,0,1,0,1,1,1,0,1,0],
-    [0,0,0,1,0,0,0,0,0,0,0,0,0,0,0],
-    [1,0,1,1,1,1,0,1,1,1,0,1,1,0,1],
-    [0,0,0,0,0,0,0,1,0,0,0,0,1,0,0],
-    [1,1,0,1,1,1,0,1,0,1,1,0,1,1,0],
-    [0,0,0,0,0,0,0,1,0,0,1,0,0,0,0],
-    [1,0,1,1,1,1,0,1,1,0,1,1,1,1,0],
-    [0,0,0,0,0,0,0,0,0,0,0,1,0,0,2],
-]
+class MazeEnv(gym.Env):
+    """Custom Gymnasium Environment for a 2D Grid Maze."""
+    metadata = {"render_modes": ["human"], "render_fps": 10}
 
-MAZE_HEIGHT = len(maze)
-MAZE_WIDTH = len(maze[0])
-START = (0, 0)
-GOAL = (14, 14)
-MOVES = ['U', 'D', 'L', 'R']
-MOVE_TO_IDX = {move: i for i, move in enumerate(MOVES)}
-
-# --- RL Hyperparameters ---
-EPISODES = 1000          # Number of training episodes
-MAX_STEPS_PER_EPISODE = MAZE_HEIGHT * MAZE_WIDTH * 2 # Max steps before reset
-LEARNING_RATE = 0.2      # Alpha (rate at which the Q-values are updated)
-DISCOUNT_FACTOR = 0.9    # Gamma (importance of future rewards)
-EXPLORATION_RATE = 1.0   # Epsilon (chance of taking a random action)
-MAX_EXPLORATION_RATE = 1.0
-MIN_EXPLORATION_RATE = 0.01
-EXPLORATION_DECAY_RATE = 0.001
-
-
-def state_to_index(pos):
-    """Converts (x, y) position to a single state index."""
-    return pos[0] * MAZE_WIDTH + pos[1]
-
-def get_reward(pos, new_pos):
-    """Defines the immediate reward for the transition. There is a small penalty for each move, a big reward for reaching the goal, and a penalty for hitting walls."""
-    reward = -0.1
-    
-    if maze[new_pos[0]][new_pos[1]] == 2:
-        reward = 100
-    
-    elif pos == new_pos:
-        reward = -5 
-
-    return reward
-
-def move(pos, direction_idx):
-    """Move one step; returns new position and success status. Checks for walls and boundaries."""
-    x, y = pos
-    direction = MOVES[direction_idx]
-    new_x, new_y = x, y
-
-    if direction == 'U': new_x -= 1
-    elif direction == 'D': new_x += 1
-    elif direction == 'L': new_y -= 1
-    elif direction == 'R': new_y += 1
-    
-    if (new_x < 0 or new_y < 0 or new_x >= MAZE_HEIGHT or 
-        new_y >= MAZE_WIDTH or maze[new_x][new_y] == 1):
-        return pos, False 
-    
-    return (new_x, new_y), True 
-
-def choose_action(state_idx, current_epsilon):
-    """Epsilon-greedy strategy: explore or exploit. """
-    if random.random() < current_epsilon:
-        return random.randint(0, len(MOVES) - 1) # Explore
-    else:
-        # Exploit
-        return np.argmax(Q_table[state_idx, :])
-
-# --- Q-Table and Agent Setup ---
-# Q-Table size: (Number of states) x (Number of actions)
-Q_table = np.zeros((MAZE_HEIGHT * MAZE_WIDTH, len(MOVES)))
-current_epsilon = EXPLORATION_RATE
-episode = 0
-step_count = 0
-current_pos = START
-
-# --- Visualization Setup ---
-fig, ax = plt.subplots(figsize=(6, 6))
-ax.set_title("Q-Learning Maze Solver (Training Agent)")
-ax.imshow(maze, cmap='binary', origin='upper')
-ax.set_xticks(range(MAZE_WIDTH))
-ax.set_yticks(range(MAZE_HEIGHT))
-ax.grid(True, color='gray', linewidth=0.5)
-
-agent, = ax.plot([], [], 'ro', markersize=8)
-goal_marker, = ax.plot(GOAL[1], GOAL[0], 'go', markersize=12)
-
-# --- Q-Learning Update Loop (for Animation) ---
-
-def update_q_learning(frame):
-    global current_pos, current_epsilon, episode, step_count
-
-    if episode >= EPISODES:
-        print(f"Q-Learning Training Finished after {EPISODES} episodes.")
-        anim.event_source.stop()
-        return agent,
-
-    state_idx = state_to_index(current_pos)
-    action_idx = choose_action(state_idx, current_epsilon)
-    
-    new_pos, success = move(current_pos, action_idx)
-    new_state_idx = state_to_index(new_pos)
-    reward = get_reward(current_pos, new_pos)
-
-    old_q_value = Q_table[state_idx, action_idx]
-    future_max_q = np.max(Q_table[new_state_idx, :])
-    
-    new_q_value = old_q_value + LEARNING_RATE * (
-        reward + DISCOUNT_FACTOR * future_max_q - old_q_value
-    )
-    Q_table[state_idx, action_idx] = new_q_value
-    
-    current_pos = new_pos
-    step_count += 1
-    
-    agent.set_data([current_pos[1]], [current_pos[0]])
-    ax.set_title(f"Episode {episode} | Step {step_count} | $\epsilon$: {current_epsilon:.3f}")
-    
-    # Reset episode
-    if maze[current_pos[0]][current_pos[1]] == 2 or step_count >= MAX_STEPS_PER_EPISODE:
+    def __init__(self):
+        super().__init__()
         
-        goal_reached = maze[current_pos[0]][current_pos[1]] == 2
+        # 0 = open, 1 = wall, 2 = goal
+        self.maze = np.array([
+            [0,1,0,1,0,0,0,1,0,0,1,0,0,1,0],
+            [0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],
+            [0,0,0,0,0,1,0,0,0,0,0,1,0,0,0],
+            [1,0,1,1,0,1,1,1,0,1,0,1,1,1,0],
+            [0,0,1,0,0,0,0,0,1,0,0,0,0,1,0],
+            [1,0,1,0,1,0,1,0,0,0,1,0,1,0,0],
+            [0,0,0,0,1,0,0,1,0,0,1,0,0,0,0],
+            [1,0,1,0,0,1,0,1,0,1,1,1,0,1,0],
+            [0,0,0,1,0,0,0,0,0,0,0,0,0,0,0],
+            [1,0,1,1,1,1,0,1,1,1,0,1,1,0,1],
+            [0,0,0,0,0,0,0,1,0,0,0,0,1,0,0],
+            [1,1,0,1,1,1,0,1,0,1,1,0,1,1,0],
+            [0,0,0,0,0,0,0,1,0,0,1,0,0,0,0],
+            [1,0,1,1,1,1,0,1,1,0,1,1,1,1,0],
+            [0,0,0,0,0,0,0,0,0,0,0,1,0,0,2],
+        ])
+
+        self.height, self.width = self.maze.shape
+        self.start = (0, 0)
+        self.goal = (14, 14)
+        self.current_pos = self.start
+
+        # Actions: 0=Up, 1=Down, 2=Left, 3=Right
+        self.action_space = spaces.Discrete(4)
         
-        print(f"\n--- Episode {episode} Completed ---")
-        print(f"Goal Status: {'REACHED' if goal_reached else 'FAILED'}")
-        print(f"Steps Taken: {step_count}")
-        print(f"Final $\epsilon$: {current_epsilon:.4f}")
+        # State space: Flattened 1D index representing grid cells (0 to height*width - 1)
+        self.observation_space = spaces.Discrete(self.height * self.width)
 
-        current_epsilon = MIN_EXPLORATION_RATE + (MAX_EXPLORATION_RATE - MIN_EXPLORATION_RATE) * np.exp(-EXPLORATION_DECAY_RATE * episode)
+        self._moves = [(-1, 0), (1, 0), (0, -1), (0, 1)]  # U, D, L, R
+
+    def _pos_to_state(self, pos):
+        return pos[0] * self.width + pos[1]
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        self.current_pos = self.start
+        return self._pos_to_state(self.current_pos), {}
+
+    def step(self, action):
+        dr, dc = self._moves[action]
+        r, c = self.current_pos
+        new_r, new_c = r + dr, c + dc
+
+        # Check bounds and wall collisions
+        if (0 <= new_r < self.height and 
+            0 <= new_c < self.width and 
+            self.maze[new_r, new_c] != 1):
+            next_pos = (new_r, new_c)
+            hit_wall = False
+        else:
+            next_pos = self.current_pos
+            hit_wall = True
+
+        self.current_pos = next_pos
+        terminated = (self.maze[next_pos[0], next_pos[1]] == 2)
         
-        episode += 1
-        step_count = 0
-        current_pos = START # Reset agent to start
+        # Reward Logic
+        if terminated:
+            reward = 100.0
+        elif hit_wall:
+            reward = -5.0
+        else:
+            reward = -0.1
 
-    return agent,
+        return self._pos_to_state(self.current_pos), reward, terminated, False, {}
 
-anim = animation.FuncAnimation(
-    fig, 
-    update_q_learning, 
-    frames=EPISODES * MAX_STEPS_PER_EPISODE,
-    interval=10, 
-    blit=True, 
-    repeat=False
-)
+# --- Example Q-Learning Loop using the Gymnasium API ---
+if __name__ == "__main__":
+    env = MazeEnv()
+    q_table = np.zeros((env.observation_space.n, env.action_space.n))
 
-plt.show()
-plt.close()
+    episodes = 500
+    lr = 0.2
+    gamma = 0.9
+    epsilon = 1.0
+    min_epsilon = 0.01
+    decay = 0.995
 
-def get_optimal_path(q_table):
-    path = [START]
-    current = START
-    for _ in range(MAZE_HEIGHT * MAZE_WIDTH): 
-        if maze[current[0]][current[1]] == 2:
-            break
-        state_idx = state_to_index(current)
-        action_idx = np.argmax(q_table[state_idx, :])
-        current, _ = move(current, action_idx)
-        path.append(current)
-    return path
+    print("Training Q-Learning agent on Gymnasium Environment...")
+    for ep in range(episodes):
+        state, _ = env.reset()
+        done = False
+        
+        while not done:
+            # Epsilon-greedy action selection
+            if np.random.rand() < epsilon:
+                action = env.action_space.sample()
+            else:
+                action = np.argmax(q_table[state])
 
-if episode >= EPISODES:
-    optimal_path = get_optimal_path(Q_table)
-    print("\nOptimal Path (Post-Training):")
-    print(optimal_path)
+            next_state, reward, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
+
+            # Q-table update
+            best_next_action = np.argmax(q_table[next_state])
+            td_target = reward + gamma * q_table[next_state, best_next_action]
+            q_table[state, action] += lr * (td_target - q_table[state, action])
+
+            state = next_state
+
+        epsilon = max(min_epsilon, epsilon * decay)
+
+    print("Training completed successfully!")
