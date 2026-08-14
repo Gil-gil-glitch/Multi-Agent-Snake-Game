@@ -18,8 +18,8 @@ class GameEngine:
         self.map = ArenaMap()
         self.team_scores = {TEAM_CYAN: 0, TEAM_MAGENTA: 0}
 
-        # Spawn 4 Snakes (2 Cyan Team, 2 Magenta Team)
-        self.p1 = Snake(1, TEAM_CYAN, start_pos=(45, 25), start_dir=DIR_RIGHT, color=COLOR_P1, is_bot=False)
+        # Spawn 4 AI Snakes (ALL BOTS)
+        self.p1 = Snake(1, TEAM_CYAN, start_pos=(45, 25), start_dir=DIR_RIGHT, color=COLOR_P1, is_bot=True)
         self.p2 = Snake(2, TEAM_CYAN, start_pos=(55, 25), start_dir=DIR_RIGHT, color=COLOR_P2, is_bot=True)
 
         self.p3 = Snake(3, TEAM_MAGENTA, start_pos=(45, 75), start_dir=DIR_LEFT, color=COLOR_P3, is_bot=True)
