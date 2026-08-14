@@ -1,254 +1,128 @@
-#
-##  game.py
-#
-#   This is the main file of the Multi-Agent Snake game that holds the 
-#   game logic along with its environment.
-#
-#
-
-import gymnasium as gym
-from gymnasium import spaces
-import numpy as np
 import pygame
-import random
+from config import *
+from map import ArenaMap
+from snake import Snake
 
-class CompetitiveSnakeEnv(gym.Env):
-    """
-    2-Player Competitive Snake Environment with Pygame rendering.
-    """
-    metadata = {"render_modes": ["human"], "render_fps": 10}
+class GameEngine:
+    def __init__(self):
+        pygame.init()
+        self.screen = pygame.display.set_mode(WINDOW_SIZE)
+        pygame.display.set_caption("Multi-Agent Snake Arena - Phase 1 & 2 Sandbox")
+        self.clock = pygame.time.Clock()
+        self.reset()
 
-    def __init__(self, grid_size=20, cell_size=25, render_mode=None):
-        super().__init__()
-        self.grid_size = grid_size
-        self.cell_size = cell_size
-        self.render_mode = render_mode
-        self.window_size = (grid_size * cell_size, grid_size * cell_size)
+    def reset(self):
+        self.map = ArenaMap()
+        # Spawn Player 1 (Cyan) near left farm entrance
+        self.p1 = Snake(1, start_pos=(50, 30), start_dir=DIR_RIGHT, color=COLOR_SNAKE1)
+        # Spawn Player 2 (Magenta) near right farm entrance
+        self.p2 = Snake(2, start_pos=(50, 70), start_dir=DIR_LEFT, color=COLOR_SNAKE2)
+        self.snakes = [self.p1, self.p2]
 
-        # 0=Up, 1=Down, 2=Left, 3=Right
-        self.action_space = spaces.Tuple([
-            spaces.Discrete(4),
-            spaces.Discrete(4)
-        ])
+    def handle_input(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return False
+            if event.type == pygame.KEYDOWN:
+                if event.key in P1_KEYS and self.p1.alive:
+                    self.p1.set_direction(P1_KEYS[event.key])
+                if event.key in P2_KEYS and self.p2.alive:
+                    self.p2.set_direction(P2_KEYS[event.key])
+        return True
 
-        # Multi-channel Observation Space for CNN / RL Agents:
-        # Channel 0: Self, Channel 1: Opponent, Channel 2: Food
-        self.observation_space = spaces.Box(
-            low=0, high=1, 
-            shape=(3, self.grid_size, self.grid_size), 
-            dtype=np.float32
-        )
+    def update(self):
+        all_occupied = set(self.p1.body + self.p2.body)
+        self.map.spawn_food(all_occupied)
 
-        self._moves = [(-1, 0), (1, 0), (0, -1), (0, 1)]  # U, D, L, R
+        for snake in self.snakes:
+            if not snake.alive:
+                continue
 
-        # Pygame setup
-        self.window = None
-        self.clock = None
+            # --- Water Hazard Logic (Slow down movement) ---
+            current_tile = self.map.get_tile(snake.body[0])
+            if current_tile == TILE_WATER:
+                snake.water_delay = not snake.water_delay
+                if snake.water_delay:
+                    continue  # Skip move tick on water
 
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
-        
-        # Initial Snake Positions (Spawning on opposite corners)
-        self.snake_1 = [(3, 3), (3, 2), (3, 1)]
-        self.dir_1 = 3  # Facing Right
+            next_head = snake.get_next_head()
+            other_snake = self.p2 if snake == self.p1 else self.p1
 
-        self.snake_2 = [(self.grid_size - 4, self.grid_size - 4), 
-                        (self.grid_size - 4, self.grid_size - 3), 
-                        (self.grid_size - 4, self.grid_size - 2)]
-        self.dir_2 = 2  # Facing Left
-
-        self.scores = [0, 0]
-        self._spawn_food()
-
-        obs_1 = self._get_obs(player=1)
-        obs_2 = self._get_obs(player=2)
-
-        return (obs_1, obs_2), {}
-
-    def _spawn_food(self):
-        """
-        Spawns food in an empty cell not occupied by either snake.
-        """
-        occupied = set(self.snake_1) | set(self.snake_2)
-        all_cells = {(r, c) for r in range(self.grid_size) for c in range(self.grid_size)}
-        free_cells = list(all_cells - occupied)
-        
-        if free_cells:
-            self.food = random.choice(free_cells)
-        else:
-            self.food = (-1, -1)
-
-    def _get_obs(self, player=1):
-        """Constructs a 3-channel grid tensor for the specified player."""
-        obs = np.zeros((3, self.grid_size, self.grid_size), dtype=np.float32)
-        
-        self_body = self.snake_1 if player == 1 else self.snake_2
-        opp_body = self.snake_2 if player == 1 else self.snake_1
-
-        # Channel 0: Self
-        for r, c in self_body:
-            obs[0, r, c] = 1.0
-            
-        # Channel 1: Opponent
-        for r, c in opp_body:
-            obs[1, r, c] = 1.0
-
-        # Channel 2: Food
-        if self.food != (-1, -1):
-            obs[2, self.food[0], self.food[1]] = 1.0
-
-        return obs
-
-    def step(self, actions):
-        """Executes simultaneous moves for both snakes."""
-        a1, a2 = actions
-        
-        # Prevent instant 180-degree self-collisions
-        if (a1 == 0 and self.dir_1 != 1) or (a1 == 1 and self.dir_1 != 0) or \
-           (a1 == 2 and self.dir_1 != 3) or (a1 == 3 and self.dir_1 != 2):
-            self.dir_1 = a1
-            
-        if (a2 == 0 and self.dir_2 != 1) or (a2 == 1 and self.dir_2 != 0) or \
-           (a2 == 2 and self.dir_2 != 3) or (a2 == 3 and self.dir_2 != 2):
-            self.dir_2 = a2
-
-        # Calculate new head positions
-        dr1, dc1 = self._moves[self.dir_1]
-        dr2, dc2 = self._moves[self.dir_2]
-        
-        new_head_1 = (self.snake_1[0][0] + dr1, self.snake_1[0][1] + dc1)
-        new_head_2 = (self.snake_2[0][0] + dr2, self.snake_2[0][1] + dc2)
-
-        # Collision Flags
-        dead_1, dead_2 = False, False
-        r1, r2 = -0.01, -0.01  # Small step penalty
-
-        # Check Head-on Collision
-        if new_head_1 == new_head_2:
-            dead_1, dead_2 = True, True
-        else:
-            # Check Snake 1 Collisions
-            if (not (0 <= new_head_1[0] < self.grid_size and 0 <= new_head_1[1] < self.grid_size) or
-                new_head_1 in self.snake_1[:-1] or new_head_1 in self.snake_2):
-                dead_1 = True
-
-            # Check Snake 2 Collisions
-            if (not (0 <= new_head_2[0] < self.grid_size and 0 <= new_head_2[1] < self.grid_size) or
-                new_head_2 in self.snake_2[:-1] or new_head_2 in self.snake_1):
-                dead_2 = True
-
-        # Resolve Rewards and Tail Movement
-        if dead_1: r1 = -10.0
-        if dead_2: r2 = -10.0
-
-        # Update Snake 1 Position
-        if not dead_1:
-            self.snake_1.insert(0, new_head_1)
-            if new_head_1 == self.food:
-                r1 = 10.0
-                self.scores[0] += 1
-                self._spawn_food()
+            # --- Push / Bump Collision Engine ---
+            if other_snake.alive and next_head in other_snake.body:
+                push_dir = snake.next_direction
+                # Attempt to shove other snake 1 cell in push direction
+                if self._try_push_snake(other_snake, push_dir):
+                    # Successfully pushed! Move aggressive snake into freed cell
+                    self._resolve_snake_step(snake, next_head)
+                else:
+                    # Target couldn't be shoved (e.g. backed against wall) -> Aggressor dies
+                    snake.alive = False
             else:
-                self.snake_1.pop()
+                self._resolve_snake_step(snake, next_head)
 
-        # Update Snake 2 Position
-        if not dead_2:
-            self.snake_2.insert(0, new_head_2)
-            if new_head_2 == self.food:
-                r2 = 10.0
-                self.scores[1] += 1
-                self._spawn_food()
-            else:
-                self.snake_2.pop()
-
-        terminated = dead_1 or dead_2
+    def _try_push_snake(self, defender, push_dir):
+        """Attempts to push the defender snake. Kills defender if pushed into Lava/Wall."""
+        shoved_positions = [(r + push_dir[0], c + push_dir[1]) for r, c in defender.body]
         
-        obs_1 = self._get_obs(player=1)
-        obs_2 = self._get_obs(player=2)
+        # Check if the pushed head or body hits deadly terrain
+        for pos in shoved_positions:
+            tile = self.map.get_tile(pos)
+            if tile in (TILE_LAVA, TILE_WALL):
+                defender.alive = False  # Defender died from being shoved into hazard!
+                return True
 
-        return (obs_1, obs_2), (r1, r2), terminated, False, {}
+        defender.shift_entire_snake(push_dir)
+        return True
 
-    def render(self):
-        """Renders the game state using Pygame."""
-        if self.render_mode is None:
+    def _resolve_snake_step(self, snake, next_head):
+        tile = self.map.get_tile(next_head)
+
+        # Lava or Wall Death
+        if tile in (TILE_LAVA, TILE_WALL):
+            snake.alive = False
             return
 
-        if self.window is None and self.render_mode == "human":
-            pygame.init()
-            pygame.display.init()
-            pygame.display.set_caption("2-Player Competitive Snake RL")
-            self.window = pygame.display.set_mode(self.window_size)
-            self.clock = pygame.time.Clock()
+        # Food Eating
+        grow = False
+        if next_head in self.map.foods:
+            self.map.foods.remove(next_head)
+            snake.score += 10
+            grow = True
 
-        canvas = pygame.Surface(self.window_size)
-        canvas.fill((20, 20, 25))  # Dark background
+        snake.move(next_head, grow=grow)
 
-        # Draw Grid
-        for x in range(0, self.window_size[0], self.cell_size):
-            pygame.draw.line(canvas, (40, 40, 50), (x, 0), (x, self.window_size[1]))
-        for y in range(0, self.window_size[1], self.cell_size):
-            pygame.draw.line(canvas, (40, 40, 50), (0, y), (self.window_size[0], y))
+    def render(self):
+        self.screen.fill(COLOR_GRASS)
 
-        # Draw Food (Gold)
-        if self.food != (-1, -1):
-            fr, fc = self.food
-            rect = pygame.Rect(fc * self.cell_size, fr * self.cell_size, self.cell_size, self.cell_size)
-            pygame.draw.rect(canvas, (255, 215, 0), rect)
+        # Render Map Tiles
+        for r in range(GRID_SIZE):
+            for c in range(GRID_SIZE):
+                tile = self.map.grid[r, c]
+                if tile != TILE_GRASS:
+                    color = COLOR_GRASS
+                    if tile == TILE_FARM: color = COLOR_FARM
+                    elif tile == TILE_WATER: color = COLOR_WATER
+                    elif tile == TILE_LAVA: color = COLOR_LAVA
+                    elif tile == TILE_WALL: color = COLOR_WALL
+                    
+                    rect = (c * CELL_SIZE, r * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+                    pygame.draw.rect(self.screen, color, rect)
 
-        # Draw Snake 1 (Cyan)
-        for i, (r, c) in enumerate(self.snake_1):
-            color = (0, 255, 200) if i == 0 else (0, 180, 140)
-            rect = pygame.Rect(c * self.cell_size, r * self.cell_size, self.cell_size, self.cell_size)
-            pygame.draw.rect(canvas, color, rect)
+        # Render Food
+        for r, c in self.map.foods:
+            rect = (c * CELL_SIZE, r * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+            pygame.draw.rect(self.screen, COLOR_FOOD, rect)
 
-        # Draw Snake 2 (Magenta)
-        for i, (r, c) in enumerate(self.snake_2):
-            color = (255, 0, 128) if i == 0 else (180, 0, 90)
-            rect = pygame.Rect(c * self.cell_size, r * self.cell_size, self.cell_size, self.cell_size)
-            pygame.draw.rect(canvas, color, rect)
+        # Render Snakes
+        for snake in self.snakes:
+            if not snake.alive:
+                continue
+            for i, (r, c) in enumerate(snake.body):
+                rect = (c * CELL_SIZE, r * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+                # Head is drawn slightly brighter
+                color = snake.color if i == 0 else (max(0, snake.color[0]-40), max(0, snake.color[1]-40), max(0, snake.color[2]-40))
+                pygame.draw.rect(self.screen, color, rect)
 
-        if self.render_mode == "human":
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.close()
-
-            self.window.blit(canvas, (0, 0))
-            pygame.event.pump()
-            pygame.display.update()
-            self.clock.tick(self.metadata["render_fps"])
-
-    def close(self):
-        if self.window is not None:
-            pygame.display.quit()
-            pygame.quit()
-            self.window = None
-
-
-# --- Run Game Loop with Heuristic / Random Agents ---
-if __name__ == "__main__":
-    env = CompetitiveSnakeEnv(render_mode="human")
-    (obs1, obs2), _ = env.reset()
-    done = False
-
-    def simple_heuristic(snake, food):
-        """Basic greedy heuristic to steer head toward food."""
-        head_r, head_c = snake[0]
-        food_r, food_c = food
-        if food_r < head_r: return 0  # Up
-        if food_r > head_r: return 1  # Down
-        if food_c < head_c: return 2  # Left
-        return 3                      # Right
-
-    print("Running 2-Snake Competitive Environment...")
-    while not done:
-        # Snake 1 uses greedy heuristic, Snake 2 takes random moves
-        a1 = simple_heuristic(env.snake_1, env.food)
-        a2 = env.action_space[1].sample()
-
-        (obs1, obs2), (r1, r2), terminated, truncated, _ = env.step([a1, a2])
-        done = terminated or truncated
-
-        env.render()
-
-    print(f"Game Over! Final Scores -> Snake 1 (Cyan): {env.scores[0]} | Snake 2 (Magenta): {env.scores[1]}")
-    env.close()
+        pygame.display.flip()
+        self.clock.tick(FPS)
