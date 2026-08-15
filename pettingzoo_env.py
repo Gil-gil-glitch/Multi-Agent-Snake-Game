@@ -76,6 +76,10 @@ class SnakeArenaParallelEnv(ParallelEnv):
             if agent not in self.agents:
                 continue
 
+            self.hunger_counters[agent] += 1
+            if self.hunger_counters[agent] >= 100:  # Starved to death
+                self.terminations[agent] = True
+                
             player_id = self.agent_to_id[agent]
             snake = self.game.snakes[player_id - 1]
             team_id = snake.team_id
