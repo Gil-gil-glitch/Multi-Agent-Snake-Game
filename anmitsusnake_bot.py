@@ -9,7 +9,7 @@ class AnmitsuSnakeBot:
         self.prev_length = 0
 
     def get_action(self, obs):
-        # 1. Update Hunger Level based on body length
+        # Update hunger based on snake length expansion
         current_length = np.sum(obs[0] > 0)
         if self.prev_length > 0 and current_length > self.prev_length:
             self.hunger = 0  # Reset hunger on eating food
@@ -17,16 +17,14 @@ class AnmitsuSnakeBot:
             self.hunger += 1
         self.prev_length = current_length
 
-        # 2. Select Dynamic Weights based on Hunger Phase
         weights = self._get_phase_weights()
 
-        # 3. Evaluate 4 Actions
         best_action = 0
         best_value = float('-inf')
 
         for action in range(4):
             features = self._extract_features(obs, action)
-            # Add small random noise to break exact ties
+            # Add uniform noise to break exact move ties
             value = np.dot(weights, features) + np.random.uniform(0, 0.01)
 
             if value > best_value:
@@ -36,19 +34,17 @@ class AnmitsuSnakeBot:
         return best_action
 
     def _get_phase_weights(self):
-        """Phase-based weight assignment similar to Reversi game phases."""
         hunger_ratio = self.hunger / float(self.max_hunger)
 
         if hunger_ratio < 0.35:
-            # PHASE 1: SATIATED -> Maximize space & evasion, ignore food
-            # [F0: Safety, F1: Opponent Head Penalty, F2: Flood Space, F3: Food Prox]
-            return np.array([1000.0, -900.0, 40.0, 2.0])
+            # PHASE 1: SATIATED -> Maximize space & evasion
+            return np.array([1000.0, -800.0, 30.0, 5.0])
         elif hunger_ratio < 0.70:
-            # PHASE 2: HUNGRY -> Balanced food seeking & space management
-            return np.array([1000.0, -700.0, 15.0, 25.0])
+            # PHASE 2: HUNGRY -> Balanced food seeking
+            return np.array([1000.0, -600.0, 15.0, 40.0])
         else:
-            # PHASE 3: STARVING -> Aggressive food rush, take tighter turns
-            return np.array([1000.0, -300.0, 5.0, 90.0])
+            # PHASE 3: STARVING -> Aggressive food rush
+            return np.array([1000.0, -200.0, 5.0, 100.0])
 
     def _extract_features(self, obs, action):
         head_pos = self._find_head(obs)
@@ -61,52 +57,42 @@ class AnmitsuSnakeBot:
 
         grid_h, grid_w = obs.shape[1], obs.shape[2]
 
-        # F0: Immediate Hard Obstacle Collision (Wall, Body, Lava)
+        # F0: Hard Obstacle Collision (Wall, Lava, Snake Bodies)
         if nr < 0 or nr >= grid_h or nc < 0 or nc >= grid_w or self._is_blocked(obs, nr, nc):
             return np.array([-1.0, 0.0, 0.0, 0.0])
         
         f0_safety = 1.0
-
-        # F1: Opponent Head Hazard Zone (Orthogonal adjacency to opponent heads)
         f1_head_hazard = 1.0 if self._is_near_opponent_head(obs, nr, nc) else 0.0
-
-        # F2: Flood Fill Reachable Space
         free_space = self._flood_fill_space(obs, nr, nc, max_depth=100)
         f2_space = free_space / 100.0
-
-        # F3: Inverted Distance to Closest Food
         food_dist = self._nearest_food_distance(obs, nr, nc)
         f3_food = 1.0 / (food_dist + 1.0) if food_dist < float('inf') else 0.0
 
         return np.array([f0_safety, f1_head_hazard, f2_space, f3_food])
 
     def _find_head(self, obs):
-        """Locates the highest intensity coordinate in Channel 0 (Head)."""
-        coords = np.argwhere(obs[0] > 0)
-        if len(coords) == 0:
-            return None
-        # Head is stored as maximum value in channel 0
-        max_idx = np.argmax(obs[0])
-        return tuple(np.unravel_index(max_idx, obs[0].shape))
+        # Head is stored as 1.0 in Channel 0
+        coords = np.argwhere(obs[0] == 1.0)
+        return tuple(coords[0]) if len(coords) > 0 else None
 
     def _is_blocked(self, obs, r, c):
-        my_body = obs[0][r, c] > 0
-        opponent_body = obs[1][r, c] > 0 if obs.shape[0] > 1 else False
-        hazard_lava = obs[3][r, c] > 0 if obs.shape[0] > 3 else False
-        return my_body or opponent_body or hazard_lava
+        # Channel 0: Self | Channel 1: Teammate | Channel 2: Enemy | Channel 4: Terrain
+        self_body = obs[0][r, c] > 0
+        teammate_body = obs[1][r, c] > 0
+        enemy_body = obs[2][r, c] > 0
+        wall_lava = obs[4][r, c] > 0.8  # >0.8 flags Wall/Lava, permits Water (0.5)
+
+        return self_body or teammate_body or enemy_body or wall_lava
 
     def _is_near_opponent_head(self, obs, r, c):
-        if obs.shape[0] <= 1:
-            return False
-        
-        # Locate opponent heads (highest values in channel 1)
-        opp_coords = np.argwhere(obs[1] > 0)
-        if len(opp_coords) == 0:
+        # Enemy heads are stored as 1.0 in Channel 2
+        enemy_heads = np.argwhere(obs[2] == 1.0)
+        if len(enemy_heads) == 0:
             return False
 
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             adj_r, adj_c = r + dr, c + dc
-            if any(np.array_equal([adj_r, adj_c], opp_pos) for opp_pos in opp_coords):
+            if any(np.array_equal([adj_r, adj_c], head) for head in enemy_heads):
                 return True
         return False
 
@@ -126,7 +112,8 @@ class AnmitsuSnakeBot:
         return len(visited)
 
     def _nearest_food_distance(self, obs, start_r, start_c):
-        food_coords = np.argwhere(obs[2] == 1) if obs.shape[0] > 2 else []
+        # Food is stored in Channel 3
+        food_coords = np.argwhere(obs[3] == 1.0)
         if len(food_coords) == 0:
             return float('inf')
         distances = [abs(start_r - fr) + abs(start_c - fc) for fr, fc in food_coords]
