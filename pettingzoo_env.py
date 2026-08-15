@@ -22,6 +22,7 @@ class SnakeArenaParallelEnv(ParallelEnv):
         # 4 Agents: snake_0 & snake_1 (Cyan Team), snake_2 & snake_3 (Magenta Team)
         self.possible_agents = ["snake_0", "snake_1", "snake_2", "snake_3"]
         self.agent_to_id = {agent: idx + 1 for idx, agent in enumerate(self.possible_agents)}
+        self.hunger_counters = {agent: 0 for agent in self.possible_agents}
 
     @lru_cache(maxsize=None)
     def observation_space(self, agent):
@@ -36,8 +37,9 @@ class SnakeArenaParallelEnv(ParallelEnv):
     def reset(self, seed=None, options=None):
         self.agents = self.possible_agents.copy()
         self.game.reset()
+        self.hunger_counters = {agent: 0 for agent in self.possible_agents}
         
-        # Disable heuristics so RL policy controls all snakes
+        # Disable heuristics so external policies control all snakes
         for s in self.game.snakes:
             s.is_bot = False
 
@@ -80,24 +82,39 @@ class SnakeArenaParallelEnv(ParallelEnv):
             snake = self.game.snakes[player_id - 1]
             team_id = snake.team_id
 
-            # Base Reward: Team Score Delta (Food + Kill Bonuses)
-            reward = (self.game.team_scores[team_id] - prev_scores[team_id]) * 0.1
-
-            # Individual Reward Shaping
-            if prev_alive[player_id] and not snake.alive:
-                reward -= 5.0  # Death Penalty for dying in Lava/Wall
+            # Score delta check (Reset hunger on food consumption)
+            score_delta = self.game.team_scores[team_id] - prev_scores[team_id]
+            if score_delta > 0:
+                self.hunger_counters[agent] = 0
             else:
-                reward -= 0.01  # Small step penalty to encourage fast food hunting
+                self.hunger_counters[agent] += 1
+
+            # Starvation condition
+            starved = False
+            if self.hunger_counters[agent] >= 100:
+                starved = True
+                snake.alive = False  # Kill snake in game engine
+
+            # Reward Calculation
+            reward = score_delta * 0.1
+
+            if (prev_alive[player_id] and not snake.alive) or starved:
+                reward -= 5.0  # Death Penalty for Wall, Lava, Collision, or Starvation
+            else:
+                reward -= 0.01  # Step penalty
 
             rewards[agent] = float(reward)
 
-            # Termination flag when snake dies
+            # Termination Status
             is_dead = not snake.alive
             terminations[agent] = is_dead
             truncations[agent] = False
-            infos[agent] = {"team_score": self.game.team_scores[team_id]}
+            infos[agent] = {
+                "team_score": self.game.team_scores[team_id],
+                "hunger": self.hunger_counters[agent]
+            }
 
-        # Filter out agents that terminated
+        # Filter out terminated agents
         self.agents = [agent for agent in self.agents if not terminations[agent]]
         observations = {agent: self._get_observation(agent) for agent in self.possible_agents}
 
@@ -127,7 +144,6 @@ class SnakeArenaParallelEnv(ParallelEnv):
             if not s.alive:
                 continue
             
-            # Determine relative channel
             if s.player_id == player_id:
                 ch = 0  # Self
             elif s.team_id == current_snake.team_id:

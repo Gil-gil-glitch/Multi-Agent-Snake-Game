@@ -18,12 +18,18 @@ class GameEngine:
         self.map = ArenaMap()
         self.team_scores = {TEAM_CYAN: 0, TEAM_MAGENTA: 0}
 
-        # Spawn 4 AI Snakes (ALL BOTS)
-        self.p1 = Snake(1, TEAM_CYAN, start_pos=(45, 25), start_dir=DIR_RIGHT, color=COLOR_P1, is_bot=True)
-        self.p2 = Snake(2, TEAM_CYAN, start_pos=(55, 25), start_dir=DIR_RIGHT, color=COLOR_P2, is_bot=True)
+        # Calculate dynamic start positions relative to any GRID_SIZE
+        row_top = max(1, GRID_SIZE // 4)
+        row_bottom = min(GRID_SIZE - 2, (GRID_SIZE * 3) // 4)
+        col_left = max(1, GRID_SIZE // 4)
+        col_right = min(GRID_SIZE - 2, (GRID_SIZE * 3) // 4)
 
-        self.p3 = Snake(3, TEAM_MAGENTA, start_pos=(45, 75), start_dir=DIR_LEFT, color=COLOR_P3, is_bot=True)
-        self.p4 = Snake(4, TEAM_MAGENTA, start_pos=(55, 75), start_dir=DIR_LEFT, color=COLOR_P4, is_bot=True)
+        # Spawn 4 AI Snakes with proportional grid coordinates
+        self.p1 = Snake(1, TEAM_CYAN, start_pos=(row_top, col_left), start_dir=DIR_RIGHT, color=COLOR_P1, is_bot=True)
+        self.p2 = Snake(2, TEAM_CYAN, start_pos=(row_bottom, col_left), start_dir=DIR_RIGHT, color=COLOR_P2, is_bot=True)
+
+        self.p3 = Snake(3, TEAM_MAGENTA, start_pos=(row_top, col_right), start_dir=DIR_LEFT, color=COLOR_P3, is_bot=True)
+        self.p4 = Snake(4, TEAM_MAGENTA, start_pos=(row_bottom, col_right), start_dir=DIR_LEFT, color=COLOR_P4, is_bot=True)
 
         self.snakes = [self.p1, self.p2, self.p3, self.p4]
         self.bots = {s.player_id: TacticalBot(s.player_id) for s in self.snakes if s.is_bot}
@@ -45,9 +51,10 @@ class GameEngine:
                 action = bot.choose_action(snake, self)
                 snake.set_direction(action)
 
-        # Spawn food
+        # Spawn food using MAX_FOOD from config (defaulting to 5 if undefined)
+        food_target = globals().get('MAX_FOOD', 5)
         all_occupied = set(p for s in self.snakes if s.alive for p in s.body)
-        self.map.spawn_food(all_occupied, target_count=35)
+        self.map.spawn_food(all_occupied, target_count=food_target)
 
         # 2. Movement & Collision Engine
         for snake in self.snakes:
@@ -71,7 +78,7 @@ class GameEngine:
 
             if target_snake:
                 if target_snake.team_id == snake.team_id:
-                    # FRIENDLY FIRE OFF: Teammate safety bounce (Move canceled for this frame)
+                    # FRIENDLY FIRE OFF: Teammate safety bounce
                     continue
                 else:
                     # ENEMY COLLISION -> Execute Push Mechanics

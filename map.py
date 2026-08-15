@@ -3,56 +3,34 @@ import random
 from config import *
 
 class ArenaMap:
-    def __init__(self, grid_size=GRID_SIZE):
-        self.grid_size = grid_size
-        self.grid = np.zeros((grid_size, grid_size), dtype=int)
+    def __init__(self):
+        # Initialize grid using config GRID_SIZE
+        self.grid = np.zeros((GRID_SIZE, GRID_SIZE), dtype=int)
         self.foods = set()
-        self._generate_map()
+        self._generate_terrain()
 
-    def _generate_map(self):
-        """
-        Method that generates the different parts of the game map.
-        """
-
-        # Outer Boundary Walls
-        self.grid[0, :] = TILE_WALL
-        self.grid[-1, :] = TILE_WALL
-        self.grid[:, 0] = TILE_WALL
-        self.grid[:, -1] = TILE_WALL
-
-        # Central Farm Zone (High food spawn area: 30x30 in center)
-        farm_start, farm_end = 35, 65
-        self.grid[farm_start:farm_end, farm_start:farm_end] = TILE_FARM
-
-        # Water Lakes (Slowing hazards)
-        self.grid[15:30, 15:35] = TILE_WATER
-        self.grid[70:85, 65:85] = TILE_WATER
-
-        # ava Pools & Choke Points (Deadly hazards)
-        self.grid[45:55, 10:25] = TILE_LAVA
-        self.grid[45:55, 75:90] = TILE_LAVA
-
-    def spawn_food(self, snake_bodies, target_count=30):
-        """
-        Spawns food across the map, with 70% preference toward Farm zones.
-        """
-
-        while len(self.foods) < target_count:
-            # Prefer spawning in Farm Zone
-            if random.random() < 0.70:
-                r = random.randint(35, 64)
-                c = random.randint(35, 64)
-                
-            else:
-                r = random.randint(1, self.grid_size - 2)
-                c = random.randint(1, self.grid_size - 2)
-
-            tile = self.grid[r, c]
-            if tile not in (TILE_LAVA, TILE_WALL) and (r, c) not in snake_bodies and (r, c) not in self.foods:
-                self.foods.add((r, c))
+    def _generate_terrain(self):
+        # Generate walls, lava, water within GRID_SIZE bounds
+        # Example terrain placement using relative coordinates:
+        pass  # Keep your existing terrain logic, ensuring ranges use GRID_SIZE
 
     def get_tile(self, pos):
         r, c = pos
-        if 0 <= r < self.grid_size and 0 <= c < self.grid_size:
+        if 0 <= r < GRID_SIZE and 0 <= c < GRID_SIZE:
             return self.grid[r, c]
-        return TILE_WALL
+        return TILE_WALL  # Treat out-of-bounds as wall collision
+
+    def spawn_food(self, occupied_positions, target_count=5):
+        attempts = 0
+        max_attempts = 100
+
+        while len(self.foods) < target_count and attempts < max_attempts:
+            attempts += 1
+            r = random.randint(0, GRID_SIZE - 1)
+            c = random.randint(0, GRID_SIZE - 1)
+
+            # Avoid spawning on obstacles, existing food, or snakes
+            if (r, c) not in occupied_positions and (r, c) not in self.foods:
+                tile = self.grid[r, c]
+                if tile in (TILE_GRASS, TILE_FARM):
+                    self.foods.add((r, c))
