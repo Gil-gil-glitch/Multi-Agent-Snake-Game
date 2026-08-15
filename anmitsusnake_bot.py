@@ -2,7 +2,7 @@ import numpy as np
 from collections import deque
 
 class AnmitsuSnakeBot:
-    def __init__(self, agent_id="snake_0", max_hunger=100):
+    def __init__(self, agent_id="snake_0", max_hunger=40):
         self.agent_id = agent_id
         self.max_hunger = max_hunger
         self.hunger = 0
