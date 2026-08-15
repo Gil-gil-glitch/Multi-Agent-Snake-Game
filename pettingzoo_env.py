@@ -7,6 +7,7 @@ from functools import lru_cache
 from config import *
 from game import GameEngine
 from snake import Snake
+from observation import build_observation
 
 class SnakeArenaParallelEnv(ParallelEnv):
     metadata = {
@@ -123,38 +124,7 @@ class SnakeArenaParallelEnv(ParallelEnv):
     def _get_observation(self, agent):
         player_id = self.agent_to_id[agent]
         current_snake = self.game.snakes[player_id - 1]
-        
-        obs = np.zeros((5, GRID_SIZE, GRID_SIZE), dtype=np.float32)
-
-        # Channel 4: Terrain Map (Walls, Lava, Water)
-        for r in range(GRID_SIZE):
-            for c in range(GRID_SIZE):
-                tile = self.game.map.grid[r, c]
-                if tile in (TILE_LAVA, TILE_WALL):
-                    obs[4, r, c] = 1.0
-                elif tile == TILE_WATER:
-                    obs[4, r, c] = 0.5
-
-        # Channel 3: Food
-        for r, c in self.game.map.foods:
-            obs[3, r, c] = 1.0
-
-        # Channels 0, 1, 2: Snake Bodies
-        for s in self.game.snakes:
-            if not s.alive:
-                continue
-            
-            if s.player_id == player_id:
-                ch = 0  # Self
-            elif s.team_id == current_snake.team_id:
-                ch = 1  # Teammate
-            else:
-                ch = 2  # Enemy
-
-            for idx, (r, c) in enumerate(s.body):
-                obs[ch, r, c] = 1.0 if idx == 0 else 0.5
-
-        return obs
+        return build_observation(self.game.map, self.game.snakes, current_snake)
 
     def render(self):
         if self.render_mode == "human":

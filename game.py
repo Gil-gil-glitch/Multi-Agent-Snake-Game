@@ -2,7 +2,7 @@ import pygame
 from config import *
 from map import ArenaMap
 from snake import Snake
-from bot import TacticalBot
+from algorithms import BOT_REGISTRY
 
 class GameEngine:
     def __init__(self):
@@ -10,13 +10,12 @@ class GameEngine:
         pygame.font.init()
         self.font = pygame.font.SysFont("Consolas", 18, bold=True)
         self.screen = pygame.display.set_mode(WINDOW_SIZE)
-        pygame.display.set_caption("2v2 Multi-Agent Snake Arena (Phases 3 & 4)")
+        pygame.display.set_caption("Multi-Agent Snake Arena")
         self.clock = pygame.time.Clock()
         self.reset()
 
     def reset(self):
         self.map = ArenaMap()
-        self.team_scores = {TEAM_CYAN: 0, TEAM_MAGENTA: 0}
 
         # Calculate dynamic start positions relative to any GRID_SIZE
         row_top = max(1, GRID_SIZE // 4)
@@ -24,23 +23,52 @@ class GameEngine:
         col_left = max(1, GRID_SIZE // 4)
         col_right = min(GRID_SIZE - 2, (GRID_SIZE * 3) // 4)
 
-        # Spawn 4 AI Snakes with proportional grid coordinates
-        self.p1 = Snake(1, TEAM_CYAN, start_pos=(row_top, col_left), start_dir=DIR_RIGHT, color=COLOR_P1, is_bot=True)
-        self.p2 = Snake(2, TEAM_CYAN, start_pos=(row_bottom, col_left), start_dir=DIR_RIGHT, color=COLOR_P2, is_bot=True)
+        # Four fixed spawn corners (position, facing direction), matched by
+        # index to sorted player_id order in SNAKE_SETUP.
+        spawn_layout = [
+            (row_top, col_left, DIR_RIGHT),
+            (row_bottom, col_left, DIR_RIGHT),
+            (row_top, col_right, DIR_LEFT),
+            (row_bottom, col_right, DIR_LEFT),
+        ]
+        colors = [COLOR_P1, COLOR_P2, COLOR_P3, COLOR_P4]
 
-        self.p3 = Snake(3, TEAM_MAGENTA, start_pos=(row_top, col_right), start_dir=DIR_LEFT, color=COLOR_P3, is_bot=True)
-        self.p4 = Snake(4, TEAM_MAGENTA, start_pos=(row_bottom, col_right), start_dir=DIR_LEFT, color=COLOR_P4, is_bot=True)
+        self.snakes = []
+        self.bots = {}
+        self.human_player = None
 
-        self.snakes = [self.p1, self.p2, self.p3, self.p4]
-        self.bots = {s.player_id: TacticalBot(s.player_id) for s in self.snakes if s.is_bot}
+        for idx, player_id in enumerate(sorted(SNAKE_SETUP.keys())):
+            setup = SNAKE_SETUP[player_id]
+            team_id = setup["team"]
+            algorithm = setup["algorithm"]
+            r, c, start_dir = spawn_layout[idx % len(spawn_layout)]
+            is_bot = algorithm != "human"
+
+            snake = Snake(player_id, team_id, start_pos=(r, c), start_dir=start_dir,
+                          color=colors[idx % len(colors)], is_bot=is_bot)
+            self.snakes.append(snake)
+
+            # Guarantee no one spawns on top of lethal terrain
+            self.map.clear_area((r, c))
+
+            if is_bot:
+                bot_cls = BOT_REGISTRY[algorithm]
+                self.bots[player_id] = bot_cls(player_id)
+            else:
+                self.human_player = snake
+
+        # Score is tracked per team id - give every snake its own team id for
+        # free-for-all, or share a team id to make a squad (2v2, 3v1, etc).
+        self.team_ids = sorted(set(s.team_id for s in self.snakes))
+        self.team_scores = {tid: 0 for tid in self.team_ids}
 
     def handle_input(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return False
-            if event.type == pygame.KEYDOWN and self.p1.alive:
+            if event.type == pygame.KEYDOWN and self.human_player and self.human_player.alive:
                 if event.key in P1_KEYS:
-                    self.p1.set_direction(P1_KEYS[event.key])
+                    self.human_player.set_direction(P1_KEYS[event.key])
         return True
 
     def update(self):
@@ -144,18 +172,19 @@ class GameEngine:
                 color = snake.color if i == 0 else (max(0, snake.color[0]-40), max(0, snake.color[1]-40), max(0, snake.color[2]-40))
                 pygame.draw.rect(self.screen, color, rect)
 
-        # Render Top HUD Banner
+        # Render Top HUD Banner (one label per team, spaced left to right)
         hud_rect = (0, 0, WINDOW_SIZE[0], HUD_HEIGHT)
         pygame.draw.rect(self.screen, COLOR_HUD, hud_rect)
 
-        cyan_alive = sum(1 for s in self.snakes if s.team_id == TEAM_CYAN and s.alive)
-        mag_alive = sum(1 for s in self.snakes if s.team_id == TEAM_MAGENTA and s.alive)
-
-        txt_cyan = self.font.render(f"CYAN TEAM: {self.team_scores[TEAM_CYAN]} PTS ({cyan_alive} Alive)", True, COLOR_P1)
-        txt_mag = self.font.render(f"MAGENTA TEAM: {self.team_scores[TEAM_MAGENTA]} PTS ({mag_alive} Alive)", True, COLOR_P3)
-
-        self.screen.blit(txt_cyan, (15, 10))
-        self.screen.blit(txt_mag, (WINDOW_SIZE[0] - txt_mag.get_width() - 15, 10))
+        x_offset = 15
+        for tid in self.team_ids:
+            team_snakes = [s for s in self.snakes if s.team_id == tid]
+            alive_count = sum(1 for s in team_snakes if s.alive)
+            team_color = team_snakes[0].color
+            label = f"TEAM {tid}: {self.team_scores[tid]} PTS ({alive_count}/{len(team_snakes)} Alive)"
+            txt = self.font.render(label, True, team_color)
+            self.screen.blit(txt, (x_offset, 10))
+            x_offset += txt.get_width() + 30
 
         pygame.display.flip()
         self.clock.tick(FPS)
